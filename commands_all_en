@@ -1,0 +1,17 @@
+{
+  "commands": [
+    {
+      "command": "start",
+      "description": "Start using bot"
+    },
+    {
+      "command": "help",
+      "description": "Display help"
+    },
+    {
+      "command": "menu",
+      "description": "Display menu"
+    }
+  ],
+  "language_code": "en"
+}

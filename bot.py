@@ -5,7 +5,7 @@ import time
 #####################################
 
 from telegram.ext import Updater, CallbackQueryHandler, InlineQueryHandler, ChosenInlineResultHandler
-from telegram import CallbackQuery, ReplyKeyboardRemove, Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, Bot, InlineQueryResultArticle, InputTextMessageContent  # noqa
+from telegram import CallbackQuery, ReplyKeyboardRemove, Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, Bot, InlineQueryResultArticle, InputTextMessageContent, InlineKeyboardButton  # noqa
 from telegram.ext import CallbackContext, Filters
 from telegram.ext import CommandHandler, MessageHandler
 
@@ -14,7 +14,6 @@ from telegram.ext import CommandHandler, MessageHandler
 from dotenv import load_dotenv
 load_dotenv()
 #####################################
-
 from bd_utils import workWithBD  # noqa
 
 bd_class = workWithBD()
@@ -31,6 +30,8 @@ keyboard_class = KeyboardController()
 updater = Updater(token=os.getenv('TOKEN'))
 bot = Bot(token=os.getenv('TOKEN'))
 
+# list of active lobbies for inline_query
+chats = bd_class.get_active_lobbies_chat_ids()
 
 # обработка входа бота в конфу
 def new_member(update: Update, context: CallbackContext):
@@ -80,9 +81,10 @@ def migchat(update: Update, context: CallbackContext):
     newchatid = update.message.chat.id
     bd_class.update_chat_id(oldchatid, newchatid)
     return
+
 # Buttons:
 
-
+# /newgame message keyboard
 def start_game_btn(update: Update, context: CallbackContext):
     asyncio.run(start_game_btn_async(update, context))
     return
@@ -101,9 +103,9 @@ async def start_game_btn_async(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     players = bd_class.get_player_list(lobby_id)
 
-    if bd_class.check_lobby_started(lobby_id):
-        query.answer(messages['lobby_already_started'])
-        return
+    # if bd_class.check_lobby_started(lobby_id):
+    #     query.answer(messages['lobby_already_started'])
+    #     return
     if user_id not in players:
         query.answer(messages['player_not_joined'])
         return
@@ -113,11 +115,18 @@ async def start_game_btn_async(update: Update, context: CallbackContext):
     else:
         # запуск игры
         start_game(chat_id, lang_code, chat_name)
-        player = bd_class.get_active_turn_player_name(lobby_id)
+        player = bd_class.get_active_turn_player_name_id_username(lobby_id)
+        players = bd_class.get_player_list_id_name_username(lobby_id)
+
+        #TODO: продумать реализацию таргета
+        keyboard = keyboard_class.generate_turn_keyboard(players, lobby_id,
+                                                         messages['turn_kb_target'])
+
+        reply_markup = InlineKeyboardMarkup(keyboard, reisize_keyboard=True)
         # keyboard = keyboard_class.generate_turn_keyboard()
         update.callback_query.message.edit_text(
             messages["game_started_text"].format(player[0], player[1]),
-            reply_markup=update.callback_query.message.reply_markup, parse_mode='MarkdownV2'
+            reply_markup=reply_markup, parse_mode='MarkdownV2'
         )
 
 
@@ -127,6 +136,7 @@ def join_game_lobby_btn(update: Update, context: CallbackContext):
 
 
 async def join_game_lobby_btn_async(update: Update, context: CallbackContext):
+    #TODO: лимитировать количество лобби для оного игрока (один игрок - одно лобби)
     # pattern = join#{id}
     query = update.callback_query
     chat_id = int(query.data.split('#')[1])
@@ -151,6 +161,7 @@ async def join_game_lobby_btn_async(update: Update, context: CallbackContext):
         return
 
     bd_class.add_player_to_lobby(user_id, chat_id)  # noqa
+    #TODO: сделать ограничение по лобби, для каждого игрока сделать только одно лобби
     query.answer(messages['player_join_lobby'])
     count = bd_class.count_players(chat_id)
     update.callback_query.message.edit_text(
@@ -163,7 +174,6 @@ async def join_game_lobby_btn_async(update: Update, context: CallbackContext):
 def open_settings_btn(update: Update, context: CallbackContext):
     query =  update.callback_query
     chat_id = int(query.data.split('#')[1])
-
     lang_code = bd_class.get_lobby_language(chat_id)
     messages = load_messages(lang_code)
 
@@ -201,8 +211,30 @@ async def leave_lobby_btn_async(update: Update, context: CallbackContext):
     query.answer(messages['player_not_joined'])
     return
 
-###
+# turn keyboard
 
+def ask_btn(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    query = update.callback_query
+    if bd_class.check_lobby_exists(chat_id):
+        lobby_id = bd_class.get_lobby_id(chat_id)
+        if bd_class.check_lobby_started(lobby_id) and not bd_class.check_lobby_paused(lobby_id):
+            print('HELLO')
+            print(f'the update is {update}')
+            print(f'the query is {query}')
+
+
+    else:
+        if not language_available(update.effective_user.language_code):
+        # DEFAULT LANGUAGE SET
+            lang_code = 'ru'
+        else:
+            lang_code = bd_class.get_lobby_language(update.effective_chat.id)
+        messages = load_messages(lang_code)
+        query.answer(messages['lobby_not_found'])
+
+###
 
 ###
 # Commands:f
@@ -219,13 +251,14 @@ def start(update: Update, context: CallbackContext):
     update.message.reply_text(messages['/start'])
     return
 
-# /update_username_name
+# /update_username_nameа
 def update_username_name(update: Update, context: CallbackContext):
     bd_class.update_name_username(
         update.effective_user.id,
         update.effective_user.username,
         update.effective_user.name
     )
+
 # /newgame
 def open_lobby(update: Update, context: CallbackContext):
     chat_id = update.message.chat.id
@@ -265,23 +298,67 @@ def open_lobby(update: Update, context: CallbackContext):
 
 def inline_query(update: Update, context: CallbackContext) -> None:
     """Handle the inline query. This is run when you type: @botusername <query>"""
+    lang_code = update.effective_user.language_code
     user_id = update.effective_user.id
-    # try:
-    callback_quary_data = update.inline_query.query
-    # except AttributeError:
-    #     chat_id = 0
-    #     pass
-    results = [
-        InlineQueryResultArticle(
-            id = f'send_location#{user_id}#{callback_quary_data}',
-            title = 'Выслать список локаций',
-            thumb_url='https://sun9-25.userapi.com/impg/a2NMifqpi-aHbs6ZY57u4FWHisgjSAZ87WWM8g/oXfEU2tp_jc.jpg?size=1024x1024&quality=96&sign=923c693e180dc82b32ffc5c36b9f95da&type=album',
-            input_message_content = InputTextMessageContent('hello'),
-        ),
-    ]
+    username = update.effective_user.username
+    name = update.effective_user.name
+    # проверка нейма и юзернейма в базе
+    if not bd_class.check_name_username_correct(user_id, username, name):
+        ...
 
-    # query = update.callback_query
-    # print(f"query is {query}")
+    if not language_available(lang_code):
+        # DEFAULT LANGUAGE SET
+        lang_code = 'ru'
+    messages = load_messages(lang_code)
+    query = update.inline_query.query
+    payload = query.split(',')
+    target = payload[0]
+
+    lobby_id = bd_class.get_lobby_id_from_user(user_id)
+
+    # если лобби находится на паузе, значит не принимаем вопросы и ответы
+    if bd_class.check_lobby_paused(lobby_id):
+        return
+
+    if not bd_class.check_player_active(user_id):
+        if not bd_class.check_user_active_answer(user_id):
+            return
+        else:
+            print('YAYAYAY')
+            asker = bd_class.get_active_turn_player_name_id_username(lobby_id)[2]
+            results = [(
+            InlineQueryResultArticle(
+                    id = f'answer#',
+                    title = f'{messages["answer_text"]}',
+                    description = f"{messages['answer_text']} {query}",
+                    thumb_url='https://sun9-19.userapi.com/impg/NpJWwSd1fr-Ql-ZIMUfO5eYkiicrRbh5WO132Q/0jaNNyXg-dw.jpg?size=128x128&quality=96&sign=58a242e77a56e5d06cfa67e3ca12e749&type=album',
+                    input_message_content = InputTextMessageContent(message_text=f'{asker}, {query}'),
+                    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton(messages["turn_kb_target"].format(name),
+                                                                              callback_data=f'target#{user_id}#{lobby_id}')]],
+                                                        reisize_keyboard=True)
+            )
+            )]
+            pass
+    else:
+        question = ', '.join(payload[1::])
+
+        if question and question[-1] != '?':
+            question += '?'
+        results = [(
+            InlineQueryResultArticle(
+                id = f'ask#{target}',
+                title = f'{messages["enter_question"]}',
+                description = messages['inline_ask_description'].format(target, question),
+                thumb_url='https://www.pngfind.com/pngs/m/2-24050_question-mark-png-image-transparent-white-question-mark.png',
+                input_message_content = InputTextMessageContent(message_text=f'{target}, {question}'),
+                reply_markup = InlineKeyboardMarkup(keyboard_class.generate_answer_keyboard(messages["answer_text"], messages["turn_kb_target"], user_id),
+                                                    reisize_keyboard=True)
+)
+)]
+
+
+    # ссылка на png со списком локций
+    # thumb_url='https://sun9-25.userapi.com/impg/a2NMifqpi-aHbs6ZY57u4FWHisgjSAZ87WWM8g/oXfEU2tp_jc.jpg?size=1024x1024&quality=96&sign=923c693e180dc82b32ffc5c36b9f95da&type=album',
     update.inline_query.answer(results)
     return
 
@@ -292,23 +369,40 @@ def inline_query_magic(update: Update, context: CallbackContext):
 
 async def inline_query_magic_async(update: Update, context: CallbackContext):
     '''Here we catch all possible inline queries and do something with it yay'''
-    # TODO: Доделать обработку инлоайнов чтобы высылаьт локации
-    result_id = update.chosen_inline_result.result_id
+    # TODO: Доделать обработку инлоайнов
+    # ask#<user_id>
+    # answer#
+    user_id = update.effective_user.id
+    lobby_id = bd_class.get_lobby_id_from_user(user_id)
+    chat_data = bot.get_chat(bd_class.get_chat_id_from_lobby_id(lobby_id))
+    chat_name = chat_data.title
 
-    user_id = int(result_id.split('#')[1])
+    lang_code = bd_class.get_lobby_language_from_lobby_id(lobby_id)
+    option_id = update.chosen_inline_result.result_id.split('#')
 
-    # если chat_id == 0 -> значит игнорим запрос
-    # chat_id = int(result_id.split('#')[2])
-    # user_id = update.effective_user.id
+    if option_id[1]:
+        target_id = bd_class.get_target_id_from_username(option_id[1])
+    messages = load_messages(lang_code)
 
-    print(f'the user_id is {user_id}')
-    print(f'the result_id is {result_id}')
-    # print(f'the chat_id is {chat_id}')
+    if option_id[0] == 'ask':
+        # bd_class.set_player_active_turn(user_id, False)
+        bd_class.set_player_active_answer(target_id, True)
+        send_message(target_id, messages["new_question"].format(chat_name))
+    elif option_id[0] == 'answer':
+        bd_class.set_player_active_answer(user_id, False)
+        current_active_player_id = bd_class.get_active_turn_player_name_id_username(lobby_id)[1]
+        bd_class.set_player_active_turn(current_active_player_id, False)
+        bd_class.set_player_active_turn(user_id, True)
+        #TODO отправить сообщение в конфу с новым водящим и клавиатурой выбора
+        #TODO после этого доделать механику обвинения (с таймингом)
     await asyncio.sleep(1)
+
+    return
 
 
 ###########################################################
 def main():
+    # bot.setMyCommands()
     updater.start_polling()
 
 
@@ -320,8 +414,9 @@ def main():
 def start_game(chat_id, lang_code, chat_name):
     lobby_id = bd_class.get_lobby_id(chat_id)
     messages = load_messages(lang_code)
+    spy_role = messages['spy_role']
     #TODO: Раскомментить точбы игра началась)
-    bd_class.start_game(chat_id, lang_code)
+    bd_class.start_game(chat_id, lang_code, spy_role)
     location = bd_class.get_lobby_location(chat_id)
     names_failures = []
     for player in bd_class.get_player_list(lobby_id):
@@ -331,7 +426,10 @@ def start_game(chat_id, lang_code, chat_name):
             # TODO: добавить inlinequery handler для всех и для того, кто ходит
             # TODO:  у всех должна быть возможность прислать им список локаций и открыть обвинение на игрока
             # TODO: если обвинение от игрока x игроку y уже есть в этом лобби, то отправить его
-            send_message(player, messages['game_start_msg'].format(chat_name, role, location))  # noqa
+            if role != spy_role:
+                send_message(player, messages['game_start_msg'].format(chat_name, role, location))  # noqa
+            else:
+                send_message(player, messages['game_start_msg_spy'].format(chat_name, role))
 
         except:
             flag = False
@@ -351,10 +449,14 @@ updater.dispatcher.add_handler(CommandHandler('start', start))
 updater.dispatcher.add_handler(CommandHandler('newgame', open_lobby))
 updater.dispatcher.add_handler(CommandHandler('update_name_username', update_username_name))
 # Button handlers
+#/newgame keyboard
 updater.dispatcher.add_handler(CallbackQueryHandler(start_game_btn, pattern=r'start#'))
 updater.dispatcher.add_handler(CallbackQueryHandler(join_game_lobby_btn, pattern=r'join#'))
 updater.dispatcher.add_handler(CallbackQueryHandler(open_settings_btn, pattern=r'settings#'))
 updater.dispatcher.add_handler(CallbackQueryHandler(leave_lobby_btn, pattern=r'leave#'))
+# turn keyboard
+# updater.dispatcher.add_handler(CallbackQueryHandler(target_btn, pattern=r'target#'))
+updater.dispatcher.add_handler(CallbackQueryHandler(ask_btn, pattern=r'ask#'))
 
 
 updater.dispatcher.add_handler(InlineQueryHandler(inline_query))
@@ -367,3 +469,5 @@ if __name__ == '__main__':
     # text_ru = open(f'text_ru.json')
     # messages = json.load(text_ru)
     main()
+
+

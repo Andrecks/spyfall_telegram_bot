@@ -76,6 +76,11 @@ class workWithBD:
         self.conn.commit()
         return self.cur.fetchone()[0]
 
+    def get_lobby_language_from_lobby_id(self, lobby_id):
+        self.cur.execute(f'SELECT language FROM lobbies WHERE id={lobby_id}')
+        self.conn.commit()
+        return self.cur.fetchone()[0]
+
     def remove_player_from_lobby(self, user_id, chat_id):
         lobby_id = self.get_lobby_id(chat_id)
         self.cur.execute(f'DELETE FROM lobby_players WHERE player_id ={user_id} AND lobby_id={lobby_id}')
@@ -83,7 +88,7 @@ class workWithBD:
         return
 
     def give_roles(self, players, roles: list,
-                   lobby_id: int) -> ...:
+                   lobby_id: int, spy_role: str) -> ...:
         player_count = len(players)
 
         SPY = random.randint(0, player_count - 1)
@@ -120,7 +125,7 @@ class workWithBD:
         pass
 
 
-    def start_game(self, chat_id, lang_code):
+    def start_game(self, chat_id, lang_code, spy_role):
         lobby_id = self.get_lobby_id(chat_id)
 
         # changing column status in table lobbies
@@ -143,7 +148,7 @@ class workWithBD:
 
         players = self.get_player_list(lobby_id)
 
-        self.give_roles(players, location["roles"], lobby_id)
+        self.give_roles(players, location["roles"], lobby_id, spy_role)
         self.set_location(lobby_id, location['name'])
 
         #TODO: старт игры: поменять статус лобби
@@ -170,13 +175,18 @@ class workWithBD:
         self.conn.commit()
         return self.cur.fetchone()[0]
 
-    def get_active_turn_player_name(self, lobby_id):
-        self.cur.execute(f'SELECT name, id FROM players JOIN lobby_players on id = player_id and active_turn = True and lobby_id = {lobby_id}')
+    def check_player_active(self, user_id):
+        self.cur.execute(f'SELECT active_turn FROM lobby_players WHERE player_id = {user_id}')
         self.conn.commit()
-        return self.cur.fetchone()
+        return self.cur.fetchone()[0]
 
     def check_lobby_started(self, lobby_id):
         self.cur.execute(f'SELECT started FROM lobbies WHERE id = {lobby_id}')
+        self.conn.commit()
+        return self.cur.fetchone()[0]
+
+    def check_lobby_paused(self, lobby_id):
+        self.cur.execute(f'SELECT paused FROM lobbies WHERE id = {lobby_id}')
         self.conn.commit()
         return self.cur.fetchone()[0]
 
@@ -189,6 +199,67 @@ class workWithBD:
         self.cur.execute(f'UPDATE lobbies SET chat_id = {new_id} WHERE chat_id = {old_id}')
         self.conn.commit()
         return
+    
+    def get_active_lobbies_chat_ids(self):
+        self.cur.execute(f'SELECT chat_id FROM lobbies WHERE started = True AND paused = False')
+        self.conn.commit()
+        return self.cur.fetchall()[0]
+
+    def get_active_turn_player_name_id_username(self, lobby_id):
+        self.cur.execute(f'SELECT name, id, username FROM lobby_players JOIN players ON player_id = id WHERE active_turn = True AND lobby_id = {lobby_id}')
+        self.conn.commit()
+        return self.cur.fetchone()
+
+    def set_player_active_turn(self, user_id, x):
+        self.cur.execute(f'UPDATE lobby_players SET active_turn = {x} WHERE player_id = {user_id}')
+        self.conn.commit()
+
+    def set_player_active_answer(self, user_id, x):
+        self.cur.execute(f'UPDATE lobby_players SET active_answer = {x} WHERE player_id = {user_id}')
+        self.conn.commit()
+
+    def get_lobby_id_from_user(self, user_id):
+        self.cur.execute(f'SELECT lobby_id FROM lobby_players WHERE player_id = {user_id}')
+        self.conn.commit()
+        return self.cur.fetchone()[0]
+    
+    def get_target_id_from_username(self, username):
+        self.cur.execute(f"SELECT id FROM players WHERE username = '{username}'")
+        self.conn.commit()
+        return self.cur.fetchone()[0]
+
+    def get_chat_id_from_lobby_id(self, lobby_id):
+        self.cur.execute(f'SELECT chat_id FROM lobbies WHERE id = {lobby_id}')
+        self.conn.commit()
+        return self.cur.fetchone()[0]
+
+    def check_name_username_correct(self, user_id, username, name):
+        self.cur.execute(f'SELECT username, name FROM players WHERE id = {user_id}')
+        self.conn.commit()
+        username_name = self.cur.fetchone()
+        # print(username_name)
+        # print(f'username {username} == {username_name[0]}???')
+        if username_name[1] != username or username_name[0] != name:
+            self.update_name_username(user_id, name, username)
+            print(f'updated username and name of user_id {user_id}')
+            print(f'{username_name[0]} -> {username}')
+            print(f'{username_name[1]} -> {name}')
+        else:
+            print('name and username of user_id {user_id} are correct')
+
+    def update_name_username(self, user_id, name, username):
+        self.cur.execute(f"UPDATE players SET name = '{name}', username = '{username}' WHERE id = {user_id}")
+        self.conn.commit()
+        return
+    
+    def check_user_active_answer(self, user_id):
+        self.cur.execute(f'SELECT active_answer FROM lobby_players WHERE player_id = {user_id}')
+        self.conn.commit()
+        return self.cur.fetchone()[0]
+    # def get_spy_id(self, lobby_id, spy_role):
+    #     self.cur.execute(f"SELECT player_id FROM lobby_players WHERE role = '{spy_role}' AND lobby_id = {lobby_id}")
+    #     self.conn.commit()
+    #     return self.cur.fetchone()[0]
 
 # boban = workWithBD()
-# print(boban.get_player_list_id_name_username(18))
+# boban.check_name_username_correct(116811452, '@NDREUH', 'Andrey')
