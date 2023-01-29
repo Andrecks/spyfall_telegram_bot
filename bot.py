@@ -12,8 +12,8 @@ from telegram.ext import CommandHandler, MessageHandler
 
 #####################################
 # можно удалить при сборке докерфайла
-from dotenv import load_dotenv
-load_dotenv()
+# from dotenv import load_dotenv
+# load_dotenv()
 #####################################
 from bd_utils import workWithBD  # noqa
 from threads import MyThread, AnotherThread
@@ -182,21 +182,30 @@ async def start_game_btn_async(update: Update, context: CallbackContext):
 
     else:
         # запуск игры
-        start_game(chat_id, lang_code, chat_name)
-        player = bd_class.get_active_turn_player_name_id_username(lobby_id)
 
-        #TODO: продумать реализацию таргета
-        keyboard = keyboard_class.generate_turn_keyboard(player, lobby_id,
-                                                         messages['turn_kb_target'],
-                                                         messages['question_btn'],
-                                                         messages['send_locs_btn'])
+        true_false = start_game(chat_id, lang_code, chat_name)
+        if true_false:
+            player = bd_class.get_active_turn_player_name_id_username(lobby_id)
 
-        reply_markup = InlineKeyboardMarkup(keyboard, reisize_keyboard=True)
+            #TODO: продумать реализацию таргета
+            keyboard = keyboard_class.generate_turn_keyboard(player, lobby_id,
+                                                            messages['turn_kb_target'],
+                                                            messages['question_btn'],
+                                                            messages['send_locs_btn'])
 
-        update.callback_query.message.edit_text(
-            messages["game_started_text"].format(player[0], player[1]),
-            reply_markup=reply_markup, parse_mode='Markdown'
-        )
+            reply_markup = InlineKeyboardMarkup(keyboard, reisize_keyboard=True)
+
+            update.callback_query.message.edit_text(
+                messages["game_started_text"].format(player[0], player[1]),
+                reply_markup=reply_markup, parse_mode='Markdown'
+            )
+        else:
+            bd_class.set_lobby_started(lobby_id, False)
+            update.callback_query.message.edit_text(
+                messages["game_canceled"],
+                reply_markup = ReplyKeyboardRemove
+            )
+        return
 
 
 def join_game_lobby_btn(update: Update, context: CallbackContext):
@@ -205,7 +214,8 @@ def join_game_lobby_btn(update: Update, context: CallbackContext):
 
 def username_correcto(username):
     if username[0] != '@':
-        username.insert(0, '@')
+        correcto = '@' + username
+        return correcto
     return username
 
 async def join_game_lobby_btn_async(update: Update, context: CallbackContext):
@@ -317,8 +327,8 @@ async def location_guess_async(update: Update, context: CallbackContext):
                 if player != user_id:
                     bd_class.add_score_user(player, 1)
             bot.edit_message_text(inline_message_id=update.callback_query.inline_message_id, reply_markup = None , text=messages["spy_guess_incorrect"].format(spy_name, true_location))
-        chat_id = bd_class.get_chat_id_from_lobby_id(lobby_id)
         send_message(chat_id, messages["end_game_reminder"])
+        bd_class.remove_players_from_lobby(lobby_id)
 
     
     #TODO: снять лобби с паузы, поменять started на False
@@ -557,6 +567,7 @@ async def vote_async(update, context):
                 bd_class.add_score_user(spy[1], 2)
                 #TODO: вычислили не того, шпиону +2 очка
             send_message(chat_id, messages["end_game_reminder"])
+            bd_class.remove_players_from_lobby(lobby_id)
         else:
             vote_id = bd_class.get_vote_id_from_user_id(user_id)
             check_vote_ended(vote_id)
@@ -649,7 +660,7 @@ def open_lobby(update: Update, context: CallbackContext):
     messages = load_messages(lang_code)
 
     if not bd_class.check_player_exists(user_id):
-        print(f'user is {update.effective_user.username}')
+        username = update.effective_user.username
 
         username = username_correcto(username)
         bd_class.insert_player(user_id, update.effective_user.full_name, username)
@@ -804,8 +815,8 @@ def inline_query_magic(update: Update, context: CallbackContext):
             target_id = option_id[1]
 
         question = update.chosen_inline_result.query
-        if question[0] != '?':
-            question.insert(0, '?')
+        if question[-1] != '?':
+            question += '?'
         bd_class.save_question_for_user(question, target_id)
         bd_class.set_player_active_turn(user_id, False)
         bd_class.set_player_active_answer(target_id, True)
@@ -881,7 +892,8 @@ def start_game(chat_id, lang_code, chat_name):
     if not flag:
         message = messages['ERROR_0'].format(', '.join(names_failures))
         send_message(chat_id, message)
-        return
+
+    return flag
 
 
 ###

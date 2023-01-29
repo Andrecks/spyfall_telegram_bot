@@ -467,7 +467,7 @@ class workWithBD:
         return
 
     def remove_players_from_lobby(self, lobby_id):
-        self.cur.execute(f'DELETE FROM lobby_players WHERE lobby_id = {lobby_id})')
+        self.cur.execute(f'DELETE FROM lobby_players WHERE lobby_id = {lobby_id}')
         self.conn.commit()
         return
 
