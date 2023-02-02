@@ -387,6 +387,8 @@ def start_vote(update: Update, context: CallbackContext):
 def check_vote_started(lobby_id, chat_id, lang_code, user_id):
     # user_id = update.effective_user.id
     lobby_id = bd_class.get_lobby_id_from_user(user_id)
+    if not lobby_id:
+        return
     lang_code = bd_class.get_lobby_language_from_lobby_id(lobby_id)
     messages = load_messages(lang_code)
     chat_id = bd_class.get_chat_id_from_lobby_id(lobby_id)

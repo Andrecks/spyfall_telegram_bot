@@ -226,6 +226,8 @@ class workWithBD:
     def get_lobby_id_from_user(self, user_id):
         self.cur.execute(f'SELECT lobby_id FROM lobby_players WHERE player_id = {user_id}')
         self.conn.commit()
+        if self.cur.fetchone is None:
+            return False
         return self.cur.fetchone()[0]
 
     def get_target_id_from_username(self, username):
